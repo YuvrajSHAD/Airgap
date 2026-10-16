@@ -1,0 +1,599 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Airgap: private tabular intelligence</title>
+<meta name="description" content="Drop in a spreadsheet and TabPFN scores it on your own GPU. Nothing leaves this machine.">
+<style>
+:root{
+  --paper:#f1f4f3; --paper2:#e8edec; --card:#f8faf9; --ink:#14181f; --ink2:#454c57; --ink3:#6f7782; --line:#c9d1ce;
+  --indigo:#3e4fa6; --teal:#2b9a8f; --ochre:#e2a23b; --madder:#c2493f; --sage:#7fa07f;
+  --t-low:#1d7468; --t-mid:#8a5a00; --t-high:#ad362d;
+  --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
+  --sans:"Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme=light]){--paper:#12161c;--paper2:#181d25;--card:#1a2029;--ink:#e9eeee;--ink2:#b3bcc2;--ink3:#8b949c;--line:#2e3742;
+  --indigo:#8a98ee;--teal:#46bfb2;--ochre:#efb95a;--madder:#e0705f;--t-low:#5fd0c2;--t-mid:#efb95a;--t-high:#f08a7b}
+}
+*{box-sizing:border-box;border-radius:0!important}
+html{scroll-behavior:smooth}
+*{scroll-margin-top:84px}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.55 var(--sans);-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:50;opacity:.28;mix-blend-mode:multiply;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' seed='4'/><feColorMatrix values='0 0 0 0 .45  0 0 0 0 .5  0 0 0 0 .5  0 0 0 .35 0'/></filter><rect width='220' height='220' filter='url(%23n)'/></svg>")}
+a{color:inherit}
+:focus-visible{outline:2px solid var(--indigo);outline-offset:2px}
+.wrap{max-width:1240px;margin:0 auto;padding:0 28px}
+h1,h2,h3{font-family:var(--serif);font-weight:400;letter-spacing:-.015em;margin:0}
+p{margin:0}
+button,select,input{font:inherit;color:inherit}
+.hide{display:none!important}
+
+/* nav */
+nav{position:sticky;top:0;z-index:30;background:color-mix(in srgb,var(--paper) 90%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+nav .wrap{display:flex;align-items:center;gap:28px;height:58px}
+.brand{font-family:var(--serif);font-size:1.45rem;letter-spacing:.01em;text-decoration:none;display:flex;align-items:center;gap:10px}
+.brand i{display:block;width:14px;height:14px;background:var(--indigo);box-shadow:7px 5px 0 -1px var(--teal)}
+nav .links{display:flex;gap:22px;font-size:.92rem;color:var(--ink2)}
+nav .links a{text-decoration:none}
+nav .links a:hover{color:var(--ink)}
+.status{margin-left:auto;display:flex;gap:8px;font-size:.8rem;flex-wrap:wrap;justify-content:flex-end}
+.chip{border:1px solid var(--line);padding:3px 9px;background:var(--card);color:var(--ink2);white-space:nowrap}
+.chip b{font-weight:600;color:var(--ink)}
+.chip.ok{border-color:var(--teal)}.chip.warn{border-color:var(--madder);color:var(--t-high)}
+@media(max-width:860px){nav .links{display:none}}
+
+/* hero */
+.hero{position:relative;overflow:hidden;border-bottom:1px solid var(--line)}
+.hero .art{position:absolute;right:-8%;top:-6%;width:66%;height:118%;pointer-events:none;isolation:isolate}
+.hero .wrap{position:relative;padding-top:96px;padding-bottom:0}
+.hero h1{font-size:clamp(2.7rem,6.6vw,5.9rem);line-height:.98;max-width:11.5em;font-weight:300;letter-spacing:-.03em}
+.hero h1 span{display:block}
+.hero .sub{margin-top:26px;max-width:34em;font-size:1.15rem;color:var(--ink2)}
+.cta{display:flex;gap:12px;margin-top:34px;flex-wrap:wrap}
+.btn{border:1px solid var(--ink);background:var(--ink);color:var(--paper);padding:12px 22px;cursor:pointer;text-decoration:none;display:inline-block;font-weight:500}
+.btn:hover{background:var(--indigo);border-color:var(--indigo)}
+.btn.ghost{background:transparent;color:var(--ink)}
+.btn.ghost:hover{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.zeros{display:grid;grid-template-columns:repeat(3,1fr);margin-top:84px;border-top:1px solid var(--line);background:color-mix(in srgb,var(--paper) 78%,transparent);backdrop-filter:blur(4px)}
+.zeros div{padding:22px 24px 26px 0;display:flex;gap:18px;align-items:baseline}
+.zeros div+div{padding-left:24px;border-left:1px solid var(--line)}
+.zeros strong{font:300 3.2rem/1 var(--serif);color:var(--indigo)}
+.zeros span{color:var(--ink2);font-size:.98rem;max-width:14em}
+@media(max-width:760px){.zeros{grid-template-columns:1fr}.zeros div+div{border-left:0;border-top:1px solid var(--line);padding-left:0}.hero .art{width:130%;right:-40%;opacity:.7}}
+
+/* watercolor: each pigment is its own pre-filtered layer, animated by transform only (GPU) */
+.blob{position:absolute;overflow:visible;aspect-ratio:200/140;height:auto;mix-blend-mode:multiply;will-change:transform}
+@keyframes drift1{0%,100%{transform:translate(0,0) rotate(0)}50%{transform:translate(24px,-16px) rotate(5deg)}}
+@keyframes drift2{0%,100%{transform:translate(0,0) rotate(0) scale(1)}50%{transform:translate(-22px,14px) rotate(-6deg) scale(1.05)}}
+@keyframes drift3{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(14px,22px) scale(.95)}}
+.d1{animation:drift1 38s ease-in-out infinite}.d2{animation:drift2 46s ease-in-out infinite}.d3{animation:drift3 31s ease-in-out infinite}
+html.busy .blob{animation-play-state:paused}
+@media(prefers-reduced-motion:reduce){.d1,.d2,.d3{animation:none!important}}
+
+/* sections */
+section{padding:92px 0;border-bottom:1px solid var(--line)}
+.sec-head{display:grid;grid-template-columns:1fr 1.4fr;gap:40px;margin-bottom:44px;align-items:end}
+.sec-head h2{font-size:clamp(2rem,3.6vw,3rem);line-height:1.05}
+.sec-head p{color:var(--ink2);font-size:1.08rem;max-width:36em}
+@media(max-width:860px){.sec-head{grid-template-columns:1fr;gap:14px}}
+
+/* workbench */
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border:1px solid var(--line);background:var(--card)}
+.card{position:relative;text-align:left;border:0;border-right:1px solid var(--line);background:transparent;padding:0 0 22px;cursor:pointer;overflow:hidden}
+.card:last-child{border-right:0}
+.card .motif{display:block;position:relative;overflow:hidden;width:100%;height:150px;border-bottom:1px solid var(--line)}
+.motif .ln{position:absolute;inset:0;width:100%;height:100%}
+.card h3{font-size:1.55rem;padding:18px 22px 4px}
+.card .one{padding:0 22px;color:var(--ink2);font-size:.97rem;min-height:3.1em}
+.card ul{margin:14px 22px 0;padding:0;list-style:none;font-size:.9rem;color:var(--ink2)}
+.card li{padding:6px 0;border-top:1px solid var(--line)}
+.card[aria-checked=true]{background:var(--paper2);box-shadow:inset 0 0 0 2px var(--ink)}
+.card:hover .motif .blob{filter:saturate(1.35)}
+.card[aria-checked=true] .motif .blob{animation-duration:14s!important}
+.card .pick{position:absolute;top:12px;right:12px;background:var(--ink);color:var(--paper);padding:2px 10px;font-size:.78rem;display:none}
+.card[aria-checked=true] .pick{display:block}
+@media(max-width:900px){.steps{grid-template-columns:1fr}.card{border-right:0;border-bottom:1px solid var(--line)}}
+.bench{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0;margin-top:28px;border:1px solid var(--line);background:var(--card)}
+.bench>div{padding:26px}
+.bench>div+div{border-left:1px solid var(--line)}
+@media(max-width:900px){.bench{grid-template-columns:1fr}.bench>div+div{border-left:0;border-top:1px solid var(--line)}}
+.bench h3{font-size:1.35rem;margin-bottom:6px}
+.hint{color:var(--ink3);font-size:.9rem}
+.drop{display:block;margin-top:16px;border:1px dashed var(--ink3);padding:38px 18px;text-align:center;cursor:pointer;position:relative;background:var(--paper)}
+.drop:hover,.drop.over{border-color:var(--indigo);background:color-mix(in srgb,var(--indigo) 7%,var(--paper))}
+.drop b{font-family:var(--serif);font-weight:400;font-size:1.25rem;display:block}
+.drop input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.samples{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;align-items:center}
+.samples button{border:1px solid var(--line);background:var(--paper);padding:6px 12px;cursor:pointer;font-size:.88rem}
+.samples button:hover{border-color:var(--ink)}
+.field{display:grid;gap:5px;margin-top:16px}
+.field label{font-size:.88rem;color:var(--ink2)}
+select,input[type=text]{border:1px solid var(--line);background:var(--paper);padding:9px 10px;width:100%}
+.meta{margin-top:14px;font-size:.92rem;color:var(--ink2);border-top:1px solid var(--line);padding-top:12px}
+.bar{height:10px;background:var(--paper2);border:1px solid var(--line);margin-top:18px;position:relative;overflow:hidden}
+.bar i{position:absolute;inset:0 auto 0 0;width:0;background:linear-gradient(90deg,var(--indigo),var(--teal),var(--ochre),var(--indigo));background-size:300% 100%;animation:flow 6s linear infinite;transition:width .4s}
+@keyframes flow{to{background-position:300% 0}}
+.err{border:1px solid var(--madder);color:var(--t-high);padding:10px 12px;margin-top:16px;font-size:.93rem}
+
+/* results */
+#results{margin-top:44px;scroll-margin-top:80px}
+.rhead{display:flex;flex-wrap:wrap;gap:12px 22px;align-items:baseline;justify-content:space-between;border-bottom:1px solid var(--ink);padding-bottom:14px}
+.rhead h2{font-size:2rem}
+.banner{border:1px solid var(--madder);background:color-mix(in srgb,var(--madder) 10%,var(--paper));padding:10px 14px;margin-top:14px;font-size:.92rem;color:var(--t-high)}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);border-top:0;background:var(--card)}
+.kpi{padding:18px 20px;border-right:1px solid var(--line)}
+.kpi:last-child{border-right:0}
+.kpi .v{font:300 2.5rem/1.05 var(--serif)}
+.kpi .l{color:var(--ink2);font-size:.9rem;margin-top:4px}
+.kpi .n{color:var(--ink3);font-size:.8rem;margin-top:2px}
+@media(max-width:860px){.kpis{grid-template-columns:1fr 1fr}.kpi{border-bottom:1px solid var(--line)}}
+.grid2{display:grid;grid-template-columns:1.35fr 1fr;gap:0;border:1px solid var(--line);border-top:0;background:var(--card)}
+.grid2>div{padding:22px 24px;min-width:0}
+.grid2>div+div{border-left:1px solid var(--line)}
+@media(max-width:960px){.grid2{grid-template-columns:1fr}.grid2>div+div{border-left:0;border-top:1px solid var(--line)}}
+.panel-t{font-family:var(--serif);font-size:1.25rem;margin-bottom:2px}
+.cuts{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:14px}
+.cuts label{font-size:.85rem;color:var(--ink2);display:block}
+.cuts input[type=range]{width:100%;accent-color:var(--indigo)}
+.tiers{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin-top:16px;border:1px solid var(--line)}
+.tier{padding:12px 14px;border-right:1px solid var(--line);border-top:4px solid}
+.tier:last-child{border-right:0}
+.tier .c{font:300 1.9rem/1 var(--serif)}
+.tier .nm{font-size:.86rem;color:var(--ink2)}
+.seg{display:inline-flex;border:1px solid var(--line);margin-top:10px}
+.seg button{border:0;background:transparent;padding:5px 12px;cursor:pointer;font-size:.85rem;color:var(--ink2)}
+.seg button[aria-pressed=true]{background:var(--ink);color:var(--paper)}
+svg text{font-family:var(--sans);fill:var(--ink2);font-size:11px}
+.axis{stroke:var(--line);stroke-width:1}
+.tip{position:fixed;z-index:60;background:var(--ink);color:var(--paper);padding:5px 9px;font-size:.8rem;pointer-events:none;display:none;max-width:260px}
+.sum{border:1px solid var(--line);border-top:0;background:var(--card);padding:26px 28px;display:grid;grid-template-columns:1fr auto;gap:18px 40px}
+.sum .txt p{max-width:46em;font-family:var(--serif);font-size:1.12rem;line-height:1.62;margin-top:12px}
+.sum .src{font-size:.82rem;color:var(--ink3);margin-top:14px}
+.sum .acts{display:flex;flex-direction:column;gap:8px;align-self:start}
+@media(max-width:760px){.sum{grid-template-columns:1fr}.sum .acts{flex-direction:row}}
+.tbl{border:1px solid var(--line);border-top:0;background:var(--card);padding:18px 24px 24px;overflow-x:auto}
+.tools{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0 14px;align-items:center}
+.tools input,.tools select{width:auto;min-width:150px}
+table{width:100%;border-collapse:collapse;font-size:.9rem}
+th{text-align:left;font-weight:600;color:var(--ink2);border-bottom:1px solid var(--ink);padding:7px 10px 7px 0;white-space:nowrap}
+td{border-bottom:1px solid var(--line);padding:8px 10px 8px 0;vertical-align:top}
+.sbar{display:inline-block;height:8px;vertical-align:middle;margin-right:8px}
+.tag{display:inline-block;border:1px solid;padding:0 8px;font-size:.8rem;white-space:nowrap}
+.dr{display:block;color:var(--ink2);font-size:.84rem}
+.dr b{font-weight:600;color:var(--ink)}
+.more{margin-top:14px}
+
+/* features */
+.caps{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);background:var(--card)}
+.cap{padding:26px 22px 28px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);position:relative}
+.cap:nth-child(4n){border-right:0}.cap:nth-last-child(-n+4){border-bottom:0}
+.cap h3{font-size:1.45rem;line-height:1.12;margin-bottom:8px}
+.cap p{color:var(--ink2);font-size:.94rem}
+.cap i{display:block;width:34px;height:8px;margin-bottom:18px}
+@media(max-width:1000px){.caps{grid-template-columns:1fr 1fr}.cap:nth-child(4n){border-right:1px solid var(--line)}.cap:nth-child(2n){border-right:0}.cap:nth-last-child(-n+4){border-bottom:1px solid var(--line)}.cap:nth-last-child(-n+2){border-bottom:0}}
+@media(max-width:560px){.caps{grid-template-columns:1fr}.cap{border-right:0!important;border-bottom:1px solid var(--line)!important}}
+.jobs{display:grid;grid-template-columns:repeat(3,1fr);gap:48px}
+.job h3{font-size:1.7rem;margin-bottom:6px}
+.job .for{color:var(--ink3);font-size:.92rem;margin-bottom:16px}
+.job dl{margin:0}.job dt{font-weight:600;margin-top:14px}.job dd{margin:2px 0 0;color:var(--ink2);font-size:.95rem}
+.job .rule{height:6px;margin-bottom:20px}
+@media(max-width:960px){.jobs{grid-template-columns:1fr;gap:56px}}
+.flow{display:grid;grid-template-columns:repeat(3,1fr);gap:0;counter-reset:s}
+.flow div{padding:0 32px 0 0}
+.flow div+div{padding-left:32px;border-left:1px solid var(--line)}
+.flow h3{font-size:1.5rem;margin:10px 0 8px}
+.flow p{color:var(--ink2)}
+.flow .no{font:300 3.6rem/1 var(--serif);color:var(--ink3)}
+@media(max-width:860px){.flow{grid-template-columns:1fr;gap:34px}.flow div+div{border-left:0;padding-left:0}}
+.air{display:grid;grid-template-columns:1fr 1fr;gap:0 56px}
+.air li{padding:14px 0;border-top:1px solid var(--line);color:var(--ink2);list-style:none}
+.air li b{color:var(--ink);font-weight:600}
+.air ul{margin:0;padding:0}
+@media(max-width:860px){.air{grid-template-columns:1fr}}
+footer{padding:40px 0 70px;color:var(--ink3);font-size:.88rem}
+footer .wrap{display:flex;justify-content:space-between;gap:30px;flex-wrap:wrap}
+footer p{max-width:46em}
+@media print{
+  body::before,nav,.hero,section,footer,.noprint,.kpis,.grid2,.tbl,.rhead .btn{display:none!important}
+  section#run,#results{display:block!important}
+  .sum{border:0}.sum .acts{display:none}
+}
+</style>
+</head>
+<body>
+<!-- shared watercolor bleed filter -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <filter id="wc" x="-25%" y="-25%" width="150%" height="150%">
+    <feTurbulence id="wcturb" type="fractalNoise" baseFrequency="0.014" numOctaves="4" seed="7" result="n"/>
+    <feDisplacementMap in="SourceGraphic" in2="n" scale="46" xChannelSelector="R" yChannelSelector="G" result="d"/>
+    <feGaussianBlur in="d" stdDeviation="1.6"/>
+  </filter>
+  <radialGradient id="gI" cx=".5" cy=".5" r=".6"><stop offset="0" stop-color="#3e4fa6" stop-opacity=".30"/><stop offset=".8" stop-color="#3e4fa6" stop-opacity=".62"/><stop offset="1" stop-color="#2d3a85" stop-opacity=".8"/></radialGradient>
+  <radialGradient id="gT" cx=".5" cy=".5" r=".6"><stop offset="0" stop-color="#2b9a8f" stop-opacity=".28"/><stop offset=".8" stop-color="#2b9a8f" stop-opacity=".58"/><stop offset="1" stop-color="#1d7468" stop-opacity=".78"/></radialGradient>
+  <radialGradient id="gO" cx=".5" cy=".5" r=".6"><stop offset="0" stop-color="#e2a23b" stop-opacity=".30"/><stop offset=".8" stop-color="#e2a23b" stop-opacity=".66"/><stop offset="1" stop-color="#c4841a" stop-opacity=".82"/></radialGradient>
+  <radialGradient id="gM" cx=".5" cy=".5" r=".6"><stop offset="0" stop-color="#c2493f" stop-opacity=".26"/><stop offset=".8" stop-color="#c2493f" stop-opacity=".55"/><stop offset="1" stop-color="#9c3027" stop-opacity=".78"/></radialGradient>
+  <radialGradient id="gS" cx=".5" cy=".5" r=".6"><stop offset="0" stop-color="#7fa07f" stop-opacity=".30"/><stop offset=".8" stop-color="#7fa07f" stop-opacity=".6"/><stop offset="1" stop-color="#5f805f" stop-opacity=".8"/></radialGradient>
+  <path id="b1" d="M30,70 C14,28 72,6 114,22 C158,38 192,62 172,94 C154,122 82,122 50,102 C34,92 34,82 30,70Z"/>
+  <path id="b2" d="M20,60 C28,20 90,10 128,30 C166,50 186,80 150,104 C118,124 52,116 30,92 C22,82 18,72 20,60Z"/>
+  <path id="b3" d="M40,50 C60,14 120,18 150,44 C176,66 164,106 120,112 C76,118 30,100 28,76 C27,66 34,58 40,50Z"/>
+</defs></svg>
+
+<div class="tip" id="tip"></div>
+
+<nav><div class="wrap">
+  <a class="brand" href="#top"><i></i>Airgap</a>
+  <div class="links"><a href="#run">Run an analysis</a><a href="#jobs">Three jobs</a><a href="#why">Why TabPFN</a><a href="#private">Privacy</a></div>
+  <div class="status" id="status"><span class="chip">checking engine</span></div>
+</div></nav>
+
+<header class="hero" id="top">
+  <div class="art" id="art" aria-hidden="true"></div>
+  <div class="wrap">
+    <h1><span>Thousands of rows.</span><span>Scored in seconds.</span><span>Sent nowhere.</span></h1>
+    <p class="sub">Drop in a spreadsheet and TabPFN scores it on this computer's GPU. No cloud account, no training run, no data science team.</p>
+    <div class="cta"><a class="btn" href="#run">Run an analysis</a><a class="btn ghost" href="#why">What makes it fast</a></div>
+    <div class="zeros">
+      <div><strong>0</strong><span>bytes leave this machine</span></div>
+      <div><strong>0</strong><span>models trained on your data</span></div>
+      <div><strong>0</strong><span>settings to tune</span></div>
+    </div>
+  </div>
+</header>
+
+<section id="run" style="padding-top:80px">
+  <div class="wrap">
+    <div class="sec-head"><h2>Pick the job, drop the file.</h2>
+      <p>Each job reads the same kind of spreadsheet: one row per record, one column holding the outcome you care about. Leave the outcome blank on new rows and Airgap scores those too.</p></div>
+
+    <div class="steps" role="radiogroup" aria-label="Use case">
+      <button class="card" role="radio" aria-checked="false" data-uc="clinical">
+        <div class="motif" data-m="clinical" aria-hidden="true"></div>
+        <span class="pick">Selected</span>
+        <h3>Clinical risk scoring</h3>
+        <p class="one">Patient blood panels and markers in. Readmission or toxicity risk, with reasons, out.</p>
+        <ul><li>Risk score and tier for every patient</li><li>The markers pushing each score up or down</li><li>One-page summary written locally</li></ul></button>
+      <button class="card" role="radio" aria-checked="false" data-uc="industrial">
+        <div class="motif" data-m="industrial" aria-hidden="true"></div>
+        <span class="pick">Selected</span>
+        <h3>Machine and yield watch</h3>
+        <p class="one">Batch telemetry in. Expected yield with a range, or failure likelihood, out.</p>
+        <ul><li>Flags batches that miss their expected range</li><li>Names the sensor readings behind each risk</li><li>Works with gaps in the log</li></ul></button>
+      <button class="card" role="radio" aria-checked="false" data-uc="credit">
+        <div class="motif" data-m="credit" aria-hidden="true"></div>
+        <span class="pick">Selected</span>
+        <h3>Credit decisions</h3>
+        <p class="one">Past loan outcomes in. Default risk and approve, review or decline out.</p>
+        <ul><li>Cutoff slider shows approvals against bad loans</li><li>Plain reason codes for each applicant</li><li>Portfolio memo your loan officer can print</li></ul></button>
+    </div>
+
+    <div class="bench" id="bench">
+      <div>
+        <h3>Your spreadsheet</h3>
+        <p class="hint" id="uchint">Choose a job above first.</p>
+        <label class="drop" id="drop"><b>Drop a CSV or Excel file here</b><span class="hint">or click to browse. It stays in this computer's memory.</span>
+          <input type="file" id="file" accept=".csv,.tsv,.txt,.xlsx,.xls"></label>
+        <div class="samples" id="samples"></div>
+        <div class="err hide" id="uperr"></div>
+      </div>
+      <div id="setup">
+        <h3>Settings</h3>
+        <p class="hint" id="setuphint">Load a file and the outcome column is picked for you.</p>
+        <div id="setupform" class="hide">
+          <div class="meta" id="fmeta"></div>
+          <div class="field"><label for="target" id="tlabel">Outcome column</label><select id="target"></select></div>
+          <div class="field"><label for="idcol">Row label column</label><select id="idcol"></select></div>
+          <div class="field hide" id="posf"><label for="pos">Counts as the event (blank to detect)</label><input type="text" id="pos" placeholder="for example: yes"></div>
+          <p class="hint" id="modehint" style="margin-top:12px"></p>
+          <div style="margin-top:20px"><button class="btn" id="go">Score it</button></div>
+          <div class="bar hide" id="bar"><i id="bari"></i></div>
+          <p class="hint hide" id="barmsg" style="margin-top:8px"></p>
+          <div class="err hide" id="runerr"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="results" class="hide"></div>
+  </div>
+</section>
+
+<section id="jobs">
+  <div class="wrap">
+    <div class="sec-head"><h2>Three jobs, one engine.</h2>
+      <p>Small tables are where private data lives: a few hundred patients, a few hundred batches, a few thousand loans. That is exactly the size TabPFN was built for.</p></div>
+    <div class="jobs">
+      <div class="job"><div class="rule" style="background:var(--madder)"></div><h3>Clinical risk scoring</h3><p class="for">For lab clinicians and trial coordinators</p>
+        <dl><dt>What goes in</dt><dd>Blood panels, gene markers, vitals and history. Missing values are fine.</dd>
+        <dt>What comes out</dt><dd>Readmission or drug toxicity probability per patient, sorted high to low, with the three markers that moved each score.</dd>
+        <dt>What you hand over</dt><dd>A one-page summary of the cohort, written by a local model from the verified numbers only.</dd></dl></div>
+      <div class="job"><div class="rule" style="background:var(--ochre)"></div><h3>Machine and yield watch</h3><p class="for">For plant engineers and shop owners</p>
+        <dl><dt>What goes in</dt><dd>Temperature, vibration, pressure, purity, tool wear, shift and machine from your SCADA export.</dd>
+        <dt>What comes out</dt><dd>Expected yield with an 80% range, or failure likelihood. Batches that land outside their range are flagged.</dd>
+        <dt>What you act on</dt><dd>The variables driving each flag, so the fix starts at the right sensor.</dd></dl></div>
+      <div class="job"><div class="rule" style="background:var(--teal)"></div><h3>Credit decisions</h3><p class="for">For credit unions and private lenders</p>
+        <dl><dt>What goes in</dt><dd>Past loans with their outcome, plus the new applications you want scored.</dd>
+        <dt>What comes out</dt><dd>Default probability, an approve, review or decline band, and the reasons behind each score.</dd>
+        <dt>What you decide</dt><dd>Move the cutoff and watch approvals and bad loans trade off on your own history.</dd></dl></div>
+    </div>
+  </div>
+</section>
+
+<section id="why">
+  <div class="wrap">
+    <div class="sec-head"><h2>Why it is instant.</h2>
+      <p>TabPFN is a foundation model pretrained on millions of synthetic tables. It reads your rows as context and answers in one pass. There is nothing to train on your side.</p></div>
+    <div class="caps">
+      <div class="cap"><i style="background:var(--indigo)"></i><h3>No training run</h3><p>Your data is context, not a training set. Results arrive as fast as the GPU can read the table.</p></div>
+      <div class="cap"><i style="background:var(--teal)"></i><h3>No tuning</h3><p>No grid search, no learning rate, no cross-validation scripts to babysit.</p></div>
+      <div class="cap"><i style="background:var(--ochre)"></i><h3>Gaps are fine</h3><p>Blank cells go straight in. No imputation step, no dropped rows.</p></div>
+      <div class="cap"><i style="background:var(--madder)"></i><h3>Mixed columns</h3><p>Numbers, categories and codes in one sheet. No encoding, no scaling.</p></div>
+      <div class="cap"><i style="background:var(--sage)"></i><h3>Built for small data</h3><p>A few hundred rows is enough to be useful. Tens of thousands still fit on one card.</p></div>
+      <div class="cap"><i style="background:var(--indigo)"></i><h3>Honest uncertainty</h3><p>Yield comes back as a range, not a single guess, so surprises stand out.</p></div>
+      <div class="cap"><i style="background:var(--teal)"></i><h3>Explains each row</h3><p>Every score lists the columns that pushed it up or down.</p></div>
+      <div class="cap"><i style="background:var(--ochre)"></i><h3>One GPU, one file</h3><p>Runs on a single consumer card. The whole product is a folder and a double-click.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="sec-head"><h2>From spreadsheet to decision.</h2><p>Three moves, none of them technical.</p></div>
+    <div class="flow">
+      <div><span class="no">1</span><h3>Drop</h3><p>Drag in a CSV or Excel file. Pick the job. The outcome column is suggested for you.</p></div>
+      <div><span class="no">2</span><h3>Score</h3><p>Known rows are scored by cross-validation so you see honest accuracy. New rows are scored from everything known.</p></div>
+      <div><span class="no">3</span><h3>Read</h3><p>Tiers, reasons and a written summary. Download the scored sheet or print the page.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="private">
+  <div class="wrap">
+    <div class="sec-head"><h2>Built to run with the cable out.</h2>
+      <p>Pull the network cable and everything on this page still works. These are the design rules that make that true.</p></div>
+    <div class="air"><ul>
+      <li><b>Local server only.</b> It listens on 127.0.0.1, so other machines cannot reach it.</li>
+      <li><b>Memory only.</b> Uploaded files are held in RAM and gone when you close the window.</li>
+      <li><b>Local model weights.</b> TabPFN loads from a file on disk and runs with the hub in offline mode.</li></ul><ul>
+      <li><b>Local writer.</b> The summary comes from a small model running through Ollama on this machine.</li>
+      <li><b>Nothing external on the page.</b> No CDN scripts, web fonts, analytics or tracking.</li>
+      <li><b>Checked numbers.</b> A summary that cites a number not in the results is replaced by a plain template.</li></ul></div>
+  </div>
+</section>
+
+<footer><div class="wrap">
+  <p>Demo files are synthetic: generated by Airgap, not real patients, plants or borrowers. Scores are decision support. A clinician, engineer or credit officer stays responsible for the decision. Check the TabPFN model licence before commercial use.</p>
+  <p>Airgap, powered by TabPFN</p>
+</div></footer>
+
+<script>
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const TCOL=['var(--teal)','var(--ochre)','var(--madder)'], TTXT=['var(--t-low)','var(--t-mid)','var(--t-high)'];
+const UC={
+ clinical:{tiers:['Low','Moderate','High'],noun:'patients',hint:'One row per patient. The outcome column holds yes/no (or 1/0) for patients whose result is known. Leave it blank for new patients.',tlabel:'Outcome column (for example readmitted_30d)',
+   samples:[['Load synthetic patients','']]},
+ industrial:{tiers:['Normal','Watch','Likely failure'],noun:'batches',hint:'One row per batch or machine reading. The outcome is a number (yield) or a failure flag. Leave it blank for batches you want predicted.',tlabel:'Outcome column (yield or failure)',
+   samples:[['Load synthetic batch yields','yield'],['Load synthetic machine failures','failure']]},
+ credit:{tiers:['Approve','Review','Decline'],noun:'applicants',hint:'One row per loan. The outcome column holds 1/0 or default/paid for past loans. Leave it blank for new applications.',tlabel:'Outcome column (for example defaulted)',
+   samples:[['Load synthetic loan book','']]}
+};
+let S={uc:null,fid:null,prof:null,res:null,cut:[.2,.5],scope:'new',shown:25,filter:'all',q:''};
+
+
+/* ---------- watercolor builder ---------- */
+const EDGE={gI:'#3e4fa6',gT:'#2b9a8f',gO:'#e2a23b',gM:'#c2493f',gS:'#7fa07f'};
+const blob=(p,g,css,anim,rot=0)=>`<svg class="blob ${anim}" viewBox="0 0 200 140" style="${css}"><use href="#${p}" fill="url(#${g})" stroke="${EDGE[g]}" stroke-opacity=".38" stroke-width="3" filter="url(#wc)" transform="rotate(${rot} 100 70)"/></svg>`;
+const line=pts=>`<svg class="ln" viewBox="0 0 200 120" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="#14181f" stroke-width="1.2" vector-effect="non-scaling-stroke" opacity=".7"/></svg>`;
+$('#art').innerHTML=blob('b1','gI','left:6%;top:2%;width:74%','d1')+blob('b2','gT','left:44%;top:34%;width:60%','d2',18)+blob('b3','gO','left:2%;top:50%;width:46%','d3')+blob('b1','gM','left:64%;top:2%;width:30%','d2',-20);
+const MOT={
+ clinical:blob('b2','gM','left:-10%;top:-8%;width:66%','d2')+blob('b1','gI','left:38%;top:-2%;width:56%','d1')+line('0,70 50,70 62,70 70,44 80,98 90,70 130,70 140,60 148,70 200,70'),
+ industrial:blob('b3','gO','left:-8%;top:-12%;width:62%','d3')+blob('b1','gT','left:40%;top:0;width:54%','d1')+line('0,62 20,62 28,40 36,86 44,34 52,92 62,48 72,70 100,62 130,62 140,30 150,94 160,50 170,66 200,62'),
+ credit:blob('b1','gS','left:-8%;top:-4%;width:64%','d1')+blob('b2','gI','left:38%;top:-6%;width:56%','d2')+line('0,96 30,96 30,78 64,78 64,60 100,60 100,66 134,66 134,40 170,40 170,26 200,26')};
+$$('.motif').forEach(m=>m.innerHTML=MOT[m.dataset.m]);
+
+/* ---------- status ---------- */
+fetch('/api/health').then(r=>r.json()).then(h=>{
+  const el=$('#status'); let x='';
+  if(h.cuda_available) x+=`<span class="chip ok"><b>GPU</b> ${esc(h.gpu)} · ${h.vram_gb} GB</span>`;
+  else x+=`<span class="chip warn"><b>CPU only</b> CUDA not found</span>`;
+  x+=`<span class="chip">TabPFN <b>${esc(h.tabpfn||'missing')}</b></span>`;
+  x+=h.llm?`<span class="chip ok">Local LLM <b>${esc(h.llm_model)}</b></span>`:`<span class="chip">Summary: template</span>`;
+  x+=`<span class="chip ${h.offline?'ok':''}">${h.offline?'Offline mode':'Local only'}</span>`;
+  el.innerHTML=x;
+}).catch(()=>{$('#status').innerHTML='<span class="chip warn">Server not reachable</span>'});
+
+/* ---------- setup flow ---------- */
+$$('.card').forEach(c=>c.onclick=()=>pickUC(c.dataset.uc));
+function pickUC(u){
+  S.uc=u; S.fid=null; S.prof=null;
+  $$('.card').forEach(c=>c.setAttribute('aria-checked',c.dataset.uc===u));
+  $('#uchint').textContent=UC[u].hint;
+  $('#samples').innerHTML='<span class="hint">No file yet?</span>'+UC[u].samples.map(([t,v])=>`<button data-v="${v}">${t}</button>`).join('');
+  $$('#samples button').forEach(b=>b.onclick=()=>loadSample(b.dataset.v));
+  fetch('/api/real').then(r=>r.json()).then(L=>{ if(S.uc!==u) return; L=L.filter(m=>m.usecase===u); if(!L.length) return;
+    $('#samples').insertAdjacentHTML('beforeend',L.map(m=>`<button data-real="${esc(m.key)}" title="${esc(m.credit)}">${esc(m.label)} (${m.rows.toLocaleString()} rows)</button>`).join('')+`<span class="hint" style="flex-basis:100%">Real data: ${esc(L.map(m=>m.credit).join('; '))}. Outcome is blank on the last rows so they are scored as new.</span>`);
+    $$('#samples button[data-real]').forEach(b=>b.onclick=async()=>{const r=await fetch('/api/real/'+b.dataset.real);send(new File([await r.blob()],b.title?b.dataset.real+'.csv':'real.csv',{type:'text/csv'}))});});
+  $('#setupform').classList.add('hide'); $('#setuphint').classList.remove('hide'); $('#results').classList.add('hide');
+}
+const drop=$('#drop');
+['dragover','dragenter'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.add('over')}));
+['dragleave','drop'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.remove('over')}));
+drop.addEventListener('drop',ev=>{const f=ev.dataTransfer.files[0]; if(f) send(f)});
+$('#file').onchange=e=>{if(e.target.files[0]) send(e.target.files[0])};
+async function loadSample(v){
+  if(!S.uc) return;
+  const r=await fetch(`/api/sample/${S.uc}?variant=${v}`); const b=await r.blob();
+  const n=(r.headers.get('content-disposition')||'').match(/filename="(.+)"/);
+  send(new File([b],n?n[1]:'sample.csv',{type:'text/csv'}));
+}
+async function send(file){
+  if(!S.uc){const e=$('#uperr');e.textContent='Choose a job above first.';e.classList.remove('hide');return}
+  $('#uperr').classList.add('hide'); $('#results').classList.add('hide');
+  const fd=new FormData(); fd.append('file',file);
+  try{
+    const r=await fetch('/api/upload',{method:'POST',body:fd}); const j=await r.json();
+    if(!r.ok) throw new Error(j.detail||'Upload failed');
+    S.fid=j.file_id; S.prof=j; S.fname=j.name; fillSetup(j);
+  }catch(e){const x=$('#uperr');x.textContent=e.message;x.classList.remove('hide')}
+}
+function fillSetup(p){
+  $('#setuphint').classList.add('hide'); $('#setupform').classList.remove('hide');
+  $('#fmeta').innerHTML=`<b>${esc(S.fname)}</b><br>${p.rows.toLocaleString()} rows, ${p.columns.length} columns`;
+  $('#tlabel').textContent=UC[S.uc].tlabel;
+  $('#target').innerHTML=p.columns.map(c=>`<option ${c.name===p.target_guess?'selected':''} value="${esc(c.name)}">${esc(c.name)} (${c.missing_pct}% blank)</option>`).join('');
+  $('#idcol').innerHTML='<option value="">Row number</option>'+p.columns.map(c=>`<option ${c.name===p.id_guess?'selected':''} value="${esc(c.name)}">${esc(c.name)}</option>`).join('');
+  $('#posf').classList.toggle('hide',S.uc==='industrial' && false);
+  $('#modehint').textContent=S.uc==='industrial'?'A numeric outcome with many values is treated as yield and gets an expected range. Anything else is treated as failure likelihood.':'The rarer outcome counts as the event unless you name it.';
+  $('#runerr').classList.add('hide'); $('#bar').classList.add('hide'); $('#barmsg').classList.add('hide'); $('#go').disabled=false;
+}
+$('#go').onclick=async()=>{
+  document.documentElement.classList.add('busy'); $('#go').disabled=true; $('#runerr').classList.add('hide'); $('#results').classList.add('hide');
+  $('#bar').classList.remove('hide'); $('#barmsg').classList.remove('hide'); $('#bari').style.width='3%'; $('#barmsg').textContent='Starting';
+  try{
+    const r=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      file_id:S.fid,usecase:S.uc,target:$('#target').value,id_col:$('#idcol').value||null,positive:$('#pos').value.trim()||null})});
+    const j=await r.json(); if(!r.ok) throw new Error(j.detail||'Could not start');
+    poll(j.job);
+  }catch(e){fail(e.message)}
+};
+function fail(m){document.documentElement.classList.remove('busy');const e=$('#runerr');e.textContent=m;e.classList.remove('hide');$('#go').disabled=false;$('#bar').classList.add('hide');$('#barmsg').classList.add('hide')}
+async function poll(id){
+  const j=await (await fetch('/api/jobs/'+id)).json();
+  $('#bari').style.width=Math.max(3,j.p*100)+'%'; $('#barmsg').textContent=j.msg||'';
+  if(j.state==='done'){document.documentElement.classList.remove('busy');S.job=id;S.res=j.result;$('#go').disabled=false;$('#bar').classList.add('hide');$('#barmsg').classList.add('hide');showResults();return}
+  if(j.state==='error'){fail(j.msg);return}
+  setTimeout(()=>poll(id),450);
+}
+
+/* ---------- results ---------- */
+const pct=(x,d=0)=>(x*100).toFixed(d)+'%';
+const tierOf=s=>s<S.cut[0]?0:(s<S.cut[1]?1:2);
+function showResults(){
+  const r=S.res; S.cut=r.cutoffs?r.cutoffs.slice():[.2,.5]; S.scope=r.n_new?'new':'cv'; S.shown=25; S.filter='all'; S.q='';
+  const m=r.metrics, reg=r.regression, names=UC[r.usecase].tiers;
+  const fb=r.engine.fallback?`<div class="banner"><b>Dev fallback engine.</b> These numbers did not come from TabPFN. Install TabPFN and its weights, then restart.</div>`:'';
+  const kp=reg?[
+    [m.mae.toFixed(2),'Average miss','cross-validated, in outcome units'],
+    [m.r2.toFixed(2),'R squared','1.0 is perfect'],
+    [pct(m.coverage),'Inside the 80% range','target is about 80%'],
+    [m.below+m.above,'Outside their range',`${m.below} below, ${m.above} above`]]:[
+    [m.auc.toFixed(2),'Cross-validated AUC','0.5 is a coin flip, 1.0 is perfect'],
+    [pct(m.base_rate),'Event rate','among rows with a known outcome'],
+    [m.lift_top_decile.toFixed(1)+'x','Top-decile lift','event rate in the top 10% of scores vs overall'],
+    [r.n_new?r.n_new.toLocaleString():r.n_labeled.toLocaleString(),r.n_new?'New rows scored':'Rows scored','of '+r.n_rows.toLocaleString()+' uploaded']];
+  $('#results').innerHTML=`
+   <div class="rhead"><div><h2>${esc({clinical:'Clinical risk scoring',industrial:reg?'Yield watch':'Failure watch',credit:'Credit decisions'}[r.usecase])}</h2>
+     <p class="hint">${esc(r.file)} · ${r.n_rows.toLocaleString()} rows · scored in <b style="color:var(--ink)">${r.seconds}s</b> on ${esc(r.engine.device)} with ${esc(r.engine.name)}</p></div>
+     <div class="noprint"><a class="btn ghost" href="/api/jobs/${S.job}/csv">Download scored sheet</a></div></div>${fb}
+   <div class="kpis" style="margin-top:0">${kp.map(k=>`<div class="kpi"><div class="v">${k[0]}</div><div class="l">${k[1]}</div><div class="n">${k[2]}</div></div>`).join('')}</div>
+   <div class="grid2"><div id="pL"></div><div id="pR"></div></div>
+   <div class="grid2" id="row3"><div id="pL2"></div><div id="pR2"></div></div>
+   <div class="sum"><div class="txt"><h3 class="panel-t">Summary</h3>${r.summary.paragraphs.map(p=>`<p>${esc(p)}</p>`).join('')}<p class="src">Written by: ${esc(r.summary.source)}</p></div>
+     <div class="acts noprint"><button class="btn" onclick="window.print()">Print summary</button></div></div>
+   <div class="tbl"><h3 class="panel-t">Every record</h3><p class="hint">${reg?'Arrow up means the column raised the expected outcome, arrow down means it lowered it.':'Arrow up means the column raised the score, arrow down means it lowered it.'}${r.notes.length?' Ignored: '+esc(r.notes.join('; '))+'.':''}</p><div class="tools" id="tools"></div><div id="tab"></div></div>`;
+  $('#results').classList.remove('hide');
+  drawPanels(); drawTable();
+  $('#results').scrollIntoView({behavior:'smooth'});
+}
+function scopeRows(){const r=S.res;return r.rows.filter(x=>S.scope==='new'?x.src==='new':x.src==='cv')}
+function drawPanels(){
+  const r=S.res, reg=r.regression;
+  $('#pR').innerHTML=`<div class="panel-t">What moves the outcome</div><p class="hint">Average effect of each column across the records explained. Longest bar matters most.</p>${importance(r.importance)}`;
+  if(reg){
+    $('#pL').innerHTML=`<div class="panel-t">Expected against actual</div><p class="hint">Each square is a known batch. On the line means the prediction was right. Red means it landed outside its 80% range.</p>${scatter(r.rows.filter(x=>x.src==='cv'))}`;
+    $('#row3').classList.add('hide'); return;
+  }
+  $('#row3').classList.toggle('hide',r.usecase!=='credit');
+  const names=UC[r.usecase].tiers;
+  const rows=scopeRows(); const cnt=[0,0,0]; rows.forEach(x=>cnt[tierOf(x.score)]++);
+  $('#pL').innerHTML=`<div class="panel-t">Score distribution</div>
+    <div class="seg" role="group" aria-label="Rows shown">${r.n_new?`<button data-s="new" aria-pressed="${S.scope==='new'}">New rows</button>`:''}<button data-s="cv" aria-pressed="${S.scope==='cv'}">Known rows (cross-validated)</button></div>
+    ${hist(rows)}
+    <div class="cuts"><div><label>${esc(names[0])} below <b id="c0v">${pct(S.cut[0],1)}</b></label><input type="range" id="c0" min="0" max="1" step=".005" value="${S.cut[0]}" aria-label="First cutoff"></div>
+    <div><label>${esc(names[2])} from <b id="c1v">${pct(S.cut[1],1)}</b></label><input type="range" id="c1" min="0" max="1" step=".005" value="${S.cut[1]}" aria-label="Second cutoff"></div></div>
+    <div class="tiers" id="tiers">${tiersHtml(cnt,rows.length,names)}</div>`;
+  $$('#pL .seg button').forEach(b=>b.onclick=()=>{S.scope=b.dataset.s;drawPanels()});
+  const upd=()=>{let a=+$('#c0').value,b=+$('#c1').value; if(a>b){if(document.activeElement.id==='c0')b=a;else a=b} S.cut=[a,b];
+    $('#c0v').textContent=pct(a,1);$('#c1v').textContent=pct(b,1); S.shown=25;
+    const rs=scopeRows(),c=[0,0,0];rs.forEach(x=>c[tierOf(x.score)]++);$('#tiers').innerHTML=tiersHtml(c,rs.length,names);
+    $('#hist').outerHTML=hist(rs).match(/<svg id="hist"[\s\S]*<\/svg>/)[0]; bindTips(); if(r.usecase==='credit') drawTradeoff(); drawTable()};
+  $('#c0').oninput=upd; $('#c1').oninput=upd;
+  if(r.usecase==='credit') drawTradeoff();
+  bindTips();
+}
+function tiersHtml(c,n,names){return c.map((v,i)=>`<div class="tier" style="border-top-color:${TCOL[i]}"><div class="c">${v.toLocaleString()}</div><div class="nm">${esc(names[i])} · ${n?pct(v/n):'0%'}</div></div>`).join('')}
+function importance(list){
+  const h=list.length*30+8;
+  return `<svg viewBox="0 0 440 ${h}" width="100%" role="img" aria-label="Column importance">${list.map((d,i)=>{
+    const y=i*30+4,w=Math.max(2,d.score/100*240);
+    return `<text x="0" y="${y+15}" style="fill:var(--ink)">${esc(d.feature.length>22?d.feature.slice(0,21)+'…':d.feature)}</text>
+      <rect x="150" y="${y+3}" width="${w}" height="16" fill="var(--indigo)" data-tip="${esc(d.feature)}: ${d.score.toFixed(0)} of 100"/>
+      <text x="${156+w}" y="${y+15}">${d.score.toFixed(0)}</text>`}).join('')}</svg>`;
+}
+function hist(rows){
+  const B=20,bins=[...Array(B)].map(()=>0); rows.forEach(x=>bins[Math.min(B-1,Math.floor(x.score*B))]++);
+  const mx=Math.max(1,...bins),W=520,H=190,L=34,Bt=26,T=8,bw=(W-L-22)/B;
+  let s=`<svg id="hist" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Distribution of scores">`;
+  [0,.5,1].forEach(f=>{const y=T+(H-T-Bt)*(1-f);s+=`<line class="axis" x1="${L}" x2="${W}" y1="${y}" y2="${y}"/><text x="${L-6}" y="${y+4}" text-anchor="end">${Math.round(mx*f)}</text>`});
+  bins.forEach((v,i)=>{const mid=(i+.5)/B,t=tierOf(mid),h=(H-T-Bt)*v/mx;
+    s+=`<rect x="${L+i*bw+1}" y="${H-Bt-h}" width="${bw-2}" height="${h}" fill="${TCOL[t]}" data-tip="${v} records scoring ${pct(i/B)} to ${pct((i+1)/B)}"/>`});
+  [0,.25,.5,.75,1].forEach(f=>s+=`<text x="${L+f*(W-L-22)}" y="${H-8}" text-anchor="middle">${pct(f)}</text>`);
+  [0,1].forEach(k=>{const x=L+S.cut[k]*(W-L-22);s+=`<line x1="${x}" x2="${x}" y1="${T}" y2="${H-Bt}" stroke="var(--ink)" stroke-width="1.5" stroke-dasharray="4 3"/>`});
+  return s+'</svg>';
+}
+function drawTradeoff(){
+  const cv=S.res.rows.filter(x=>x.src==='cv').sort((a,b)=>a.score-b.score); const n=cv.length; if(!n) return;
+  const pts=[];let bad=0;cv.forEach((x,i)=>{bad+=x.actual;if((i+1)%Math.max(1,Math.floor(n/80))===0||i===n-1)pts.push([(i+1)/n,bad/(i+1),x.score])});
+  const W=520,H=210,L=40,B=30,T=10,X=v=>L+v*(W-L-24),mxy=Math.max(.05,...pts.map(p=>p[1]))*1.1,Y=v=>T+(H-T-B)*(1-v/mxy);
+  const cur=cv.filter(x=>x.score<S.cut[0]),ca=cur.length/n,cb=cur.length?cur.reduce((a,x)=>a+x.actual,0)/cur.length:0;
+  let s=`<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Approval rate against default rate">`;
+  [0,.5,1].forEach(f=>{const v=mxy*f,y=Y(v);s+=`<line class="axis" x1="${L}" x2="${W-8}" y1="${y}" y2="${y}"/><text x="${L-6}" y="${y+4}" text-anchor="end">${pct(v)}</text>`});
+  [0,.25,.5,.75,1].forEach(f=>s+=`<text x="${X(f)}" y="${H-10}" text-anchor="middle">${pct(f)}</text>`);
+  s+=`<polyline fill="none" stroke="var(--indigo)" stroke-width="2" points="${pts.map(p=>X(p[0])+','+Y(p[1])).join(' ')}"/>`;
+  s+=`<rect x="${X(ca)-5}" y="${Y(cb)-5}" width="10" height="10" fill="var(--ink)" stroke="var(--card)" stroke-width="2"/>`;
+  s+=`<text x="${W/2}" y="${H}" text-anchor="middle" style="font-size:10px">share of applicants approved</text></svg>`;
+  $('#pL2').innerHTML=`<div class="panel-t">Approvals against bad loans</div><p class="hint">On your known history. Approve below the first cutoff: <b style="color:var(--ink)">${pct(ca)}</b> approved, <b style="color:var(--ink)">${pct(cb,1)}</b> of them defaulted. The square moves with the slider.</p>${s}`;
+  const base=cv.reduce((a,x)=>a+x.actual,0)/n;
+  $('#pR2').innerHTML=`<div class="panel-t">Reading the curve</div><p style="margin-top:8px;color:var(--ink2)">Approving everyone gives a default rate of ${pct(base,1)}. Every point left of the right edge is a stricter policy. The steeper the curve falls as you move left, the more the model separates good loans from bad.</p>
+   <p style="margin-top:12px;color:var(--ink2)">These figures use cross-validated scores, so each known loan was scored by a model that had not seen its outcome.</p>`;
+}
+function scatter(rows){
+  const W=520,H=300,L=40,B=30,T=8,vals=rows.flatMap(x=>[x.actual,x.score]);
+  const lo=Math.min(...vals),hi=Math.max(...vals),pad=(hi-lo)*.05,a=lo-pad,b=hi+pad,X=v=>L+(v-a)/(b-a)*(W-L-10),Y=v=>T+(H-T-B)*(1-(v-a)/(b-a));
+  let s=`<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Expected against actual">`;
+  for(let i=0;i<=4;i++){const v=a+(b-a)*i/4;s+=`<line class="axis" x1="${L}" x2="${W-10}" y1="${Y(v)}" y2="${Y(v)}"/><text x="${L-6}" y="${Y(v)+4}" text-anchor="end">${v.toFixed(1)}</text><text x="${X(v)}" y="${H-12}" text-anchor="middle">${v.toFixed(1)}</text>`}
+  s+=`<line x1="${X(a)}" y1="${Y(a)}" x2="${X(b)}" y2="${Y(b)}" stroke="var(--ink)" stroke-dasharray="4 3"/>`;
+  rows.forEach(x=>{const f=x.flag;s+=`<rect x="${X(x.score)-2.5}" y="${Y(x.actual)-2.5}" width="5" height="5" fill="${f?'var(--madder)':'var(--indigo)'}" fill-opacity="${f?1:.5}" data-tip="${esc(x.id)}: expected ${x.score.toFixed(1)} (${x.lo.toFixed(1)} to ${x.hi.toFixed(1)}), actual ${x.actual.toFixed(1)}"/>`});
+  return s+`<text x="${W/2}" y="${H-1}" text-anchor="middle" style="font-size:10px">expected</text></svg>`;
+}
+const tip=$('#tip');
+function bindTips(){$$('[data-tip]').forEach(e=>{e.onmousemove=ev=>{tip.textContent=e.dataset.tip;tip.style.display='block';tip.style.left=ev.clientX+14+'px';tip.style.top=ev.clientY+14+'px'};e.onmouseleave=()=>tip.style.display='none'})}
+
+/* ---------- table ---------- */
+function drawTable(){
+  const r=S.res,reg=r.regression,names=UC[r.usecase].tiers;
+  if(!$('#tools').innerHTML){
+    $('#tools').innerHTML=`<input type="text" id="q" placeholder="Search by ID" aria-label="Search by ID"><select id="flt" aria-label="Filter rows">
+      <option value="all">All rows</option>${r.n_new?'<option value="new">New rows only</option>':''}${reg?'<option value="flag">Outside range only</option>':`<option value="hi">${esc(names[2])} only</option>`}</select>`;
+    $('#q').oninput=e=>{S.q=e.target.value.toLowerCase();S.shown=25;drawTable()}; $('#flt').onchange=e=>{S.filter=e.target.value;S.shown=25;drawTable()};
+  }
+  let rows=r.rows.filter(x=>(!S.q||x.id.toLowerCase().includes(S.q))&&(S.filter==='all'||(S.filter==='new'&&x.src==='new')||(S.filter==='flag'&&x.flag)||(S.filter==='hi'&&!reg&&tierOf(x.score)===2)));
+  rows=reg?rows.sort((a,b)=>(b.flag?1:0)-(a.flag?1:0)||Math.abs((b.actual??b.score)-b.score)-Math.abs((a.actual??a.score)-a.score)):rows.sort((a,b)=>b.score-a.score);
+  const arrow=d=>`<span class="dr"><b style="color:${d.e>0?'var(--t-high)':'var(--t-low)'}">${d.e>0?'▲':'▼'}</b> ${esc(d.f)} <b>${esc(d.v)}</b></span>`;
+  const body=rows.slice(0,S.shown).map(x=>{
+    if(reg){const f=x.flag;return `<tr><td>${esc(x.id)}</td><td>${x.src==='new'?'New':'Known'}</td><td>${x.score.toFixed(1)} <span class="hint">(${x.lo.toFixed(1)} to ${x.hi.toFixed(1)})</span></td><td>${x.actual!=null?x.actual.toFixed(1):'-'}</td>
+      <td>${f?`<span class="tag" style="color:var(--t-high)">${f==='below'?'Below range':'Above range'}</span>`:(x.actual!=null?'<span class="tag" style="color:var(--t-low)">In range</span>':'')}</td><td>${x.d.map(arrow).join('')}</td></tr>`}
+    const t=tierOf(x.score);
+    return `<tr><td>${esc(x.id)}</td><td>${x.src==='new'?'New':'Known'}</td><td><span class="sbar" style="width:${Math.max(2,x.score*90)}px;background:${TCOL[t]}"></span>${pct(x.score,1)}</td>
+      <td><span class="tag" style="color:${TTXT[t]}">${esc(names[t])}</span></td><td>${x.actual!=null?(x.actual?'Event':'No event'):'-'}</td><td>${x.d.map(arrow).join('')}</td></tr>`}).join('');
+  $('#tab').innerHTML=`<table><thead><tr>${reg?'<th>Batch</th><th>Rows</th><th>Expected (80% range)</th><th>Actual</th><th>Status</th><th>Drivers</th>':'<th>Record</th><th>Rows</th><th>Risk score</th><th>Tier</th><th>Known outcome</th><th>Top drivers</th>'}</tr></thead><tbody>${body}</tbody></table>
+   <p class="hint" style="margin-top:10px">Showing ${Math.min(S.shown,rows.length).toLocaleString()} of ${rows.length.toLocaleString()}. Drivers are listed for the highest-risk and all new records.</p>
+   ${rows.length>S.shown?'<button class="btn ghost more" id="more">Show 50 more</button>':''}`;
+  const m=$('#more'); if(m) m.onclick=()=>{S.shown+=50;drawTable()};
+}
+</script>
+</body>
+</html>

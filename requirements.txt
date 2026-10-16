@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+python-multipart
+pandas
+openpyxl
+requests
+scikit-learn
+tabpfn
+# torch is installed separately by install.bat (CUDA build). Do not pip install plain "torch" on Windows: it is CPU-only.
+xlrd
